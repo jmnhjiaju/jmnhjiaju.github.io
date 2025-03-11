@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -528,28 +527,34 @@
                                 }
                             });
                             
-                            // 防止滚动事件冒泡
-                            document.getElementById(image.id).addEventListener('wheel', (e) => {
-                                e.stopPropagation();
-                                isUserInteracting = true;
-                                stopAutoPlay();
-                                
-                                // 如果是中间项目
-                                if (idx === currentIndex) {
-                                    stopRotation();
-                                }
-                                
-                                // 5秒后恢复自动播放
-                                setTimeout(() => {
-                                    if (!document.querySelector('.carousel-item:hover')) {
-                                        isUserInteracting = false;
-                                        if (!isAnimating) {
-                                            startAutoPlay();
-                                            checkAndStartRotation();
+                            // 修改：仅在全景图查看器元素上阻止滚动事件
+                            const viewerElement = document.getElementById(image.id);
+                            if (viewerElement) {
+                                const pnlmContainer = viewerElement.querySelector('.pnlm-container');
+                                if (pnlmContainer) {
+                                    pnlmContainer.addEventListener('wheel', (e) => {
+                                        e.stopPropagation();
+                                        isUserInteracting = true;
+                                        stopAutoPlay();
+                                        
+                                        // 如果是中间项目
+                                        if (idx === currentIndex) {
+                                            stopRotation();
                                         }
-                                    }
-                                }, 5000);
-                            }, { passive: false });
+                                        
+                                        // 5秒后恢复自动播放
+                                        setTimeout(() => {
+                                            if (!document.querySelector('.carousel-item:hover')) {
+                                                isUserInteracting = false;
+                                                if (!isAnimating) {
+                                                    startAutoPlay();
+                                                    checkAndStartRotation();
+                                                }
+                                            }
+                                        }, 5000);
+                                    }, { passive: false });
+                                }
+                            }
                             
                         } catch (err) {
                             console.error(`初始化全景图 ${image.id} 失败:`, err);
@@ -1123,15 +1128,8 @@
             });
         });
         
-        // 禁止文档滚动
-        document.addEventListener('wheel', (e) => {
-            const target = e.target;
-            const isPanorama = target.closest('.panorama-viewer');
-            
-            if (!isPanorama) {
-                e.preventDefault();
-            }
-        }, { passive: false });
+        // 修改：删除禁止文档滚动的全局事件监听器，仅在特定元素上处理滚动
+        // 不再阻止整个文档的滚动
         
         // 键盘控制
         document.addEventListener('keydown', (e) => {
@@ -1217,6 +1215,9 @@
                 }
             }, 500);
         });
+        
+        // 向父窗口发送准备就绪消息
+        window.parent.postMessage('panoramaReady', '*');
     </script>
 </body>
 </html>
