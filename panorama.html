@@ -296,6 +296,9 @@
         // 全屏时的全景图索引
         let fullscreenIndex = -1;
         
+        // 创建一个变量来控制滚轮行为
+        let wheelEventHandlers = new Map();
+        
         const carouselWrapper = document.getElementById('carouselWrapper');
         const indicators = document.getElementById('indicators');
         
@@ -527,34 +530,8 @@
                                 }
                             });
                             
-                            // 修改：仅在全景图查看器元素上阻止滚动事件
-                            const viewerElement = document.getElementById(image.id);
-                            if (viewerElement) {
-                                const pnlmContainer = viewerElement.querySelector('.pnlm-container');
-                                if (pnlmContainer) {
-                                    pnlmContainer.addEventListener('wheel', (e) => {
-                                        e.stopPropagation();
-                                        isUserInteracting = true;
-                                        stopAutoPlay();
-                                        
-                                        // 如果是中间项目
-                                        if (idx === currentIndex) {
-                                            stopRotation();
-                                        }
-                                        
-                                        // 5秒后恢复自动播放
-                                        setTimeout(() => {
-                                            if (!document.querySelector('.carousel-item:hover')) {
-                                                isUserInteracting = false;
-                                                if (!isAnimating) {
-                                                    startAutoPlay();
-                                                    checkAndStartRotation();
-                                                }
-                                            }
-                                        }, 5000);
-                                    }, { passive: false });
-                                }
-                            }
+                            // 修改：在Pannellum初始化后为全景图的pnlm-container添加鼠标滚轮事件
+                            setupPanoramaViewerWheelEvent(image.id, idx);
                             
                         } catch (err) {
                             console.error(`初始化全景图 ${image.id} 失败:`, err);
@@ -572,6 +549,89 @@
             // 初始化时中间项目没有被悬停
             isCenterHovered = false;
             checkAndStartRotation();
+            
+            // 通知父窗口准备就绪
+            sendReadyMessageToParent();
+        }
+        
+        // 将消息发送给父窗口
+        function sendReadyMessageToParent() {
+            try {
+                // 首先尝试发送消息给父窗口
+                window.parent.postMessage('panoramaReady', '*');
+                
+                // 然后通过iframe API尝试修改父窗口的滚动行为
+                // 注意：出于安全考虑，这通常需要父窗口和iframe同源
+                if (window.parent !== window) {
+                    console.log('通知父窗口全景图就绪');
+                }
+            } catch (e) {
+                console.error('向父窗口发送消息失败:', e);
+            }
+        }
+        
+        // 为全景图查看器设置滚轮事件处理
+        function setupPanoramaViewerWheelEvent(panoramaId, index) {
+            // 延迟一段时间确保全景图容器完全渲染
+            setTimeout(() => {
+                const viewerElement = document.getElementById(panoramaId);
+                if (!viewerElement) return;
+                
+                // 查找Pannellum创建的容器元素
+                const pnlmContainer = viewerElement.querySelector('.pnlm-container');
+                if (!pnlmContainer) return;
+                
+                console.log(`设置全景图 ${panoramaId} 的滚轮事件处理`);
+                
+                // 创建滚轮事件处理函数
+                const wheelHandler = function(e) {
+                    // 注意：此处不阻止默认行为但阻止事件冒泡
+                    e.stopPropagation();
+                    
+                    // 标记用户交互
+                    isUserInteracting = true;
+                    stopAutoPlay();
+                    
+                    // 如果是中间项目
+                    if (index === currentIndex) {
+                        stopRotation();
+                    }
+                    
+                    // 控制全景图的缩放
+                    const viewer = panoramaViewers[index];
+                    if (viewer) {
+                        const hfov = viewer.getHfov();
+                        // 根据滚轮方向调整视场角度（缩放）
+                        // deltaY < 0 表示向上滚动，放大；deltaY > 0 表示向下滚动，缩小
+                        const newHfov = e.deltaY < 0 ? Math.max(hfov - 5, 30) : Math.min(hfov + 5, 120);
+                        viewer.setHfov(newHfov);
+                    }
+                    
+                    // 5秒后恢复自动播放
+                    setTimeout(() => {
+                        if (!document.querySelector('.carousel-item:hover') && !isFullscreenMode) {
+                            isUserInteracting = false;
+                            if (!isAnimating) {
+                                startAutoPlay();
+                                checkAndStartRotation();
+                            }
+                        }
+                    }, 5000);
+                };
+                
+                // 存储处理函数引用，以便稍后可以移除
+                wheelEventHandlers.set(panoramaId, wheelHandler);
+                
+                // 为pnlm-container添加滚轮事件监听
+                pnlmContainer.addEventListener('wheel', wheelHandler, { passive: true });
+                
+                // 为内部的canvas元素也添加相同的事件监听
+                const canvas = pnlmContainer.querySelector('canvas');
+                if (canvas) {
+                    canvas.addEventListener('wheel', wheelHandler, { passive: true });
+                }
+                
+            }, 300); // 延迟300ms确保DOM已更新
         }
         
         // 保存当前全景图状态
@@ -1128,9 +1188,6 @@
             });
         });
         
-        // 修改：删除禁止文档滚动的全局事件监听器，仅在特定元素上处理滚动
-        // 不再阻止整个文档的滚动
-        
         // 键盘控制
         document.addEventListener('keydown', (e) => {
             if (isAnimating) return;
@@ -1180,6 +1237,55 @@
             }
         });
         
+        // ===== 重要：创建自定义IFrame通信系统 =====
+        // 这将创建一个消息通道来通知父窗口该iFrame中的鼠标位置
+        // 用于解决滚动事件问题
+        
+        // 记录鼠标是否在全景图内
+        let isMouseOverPanorama = false;
+        
+        // 添加全局鼠标移动监听
+        document.addEventListener('mousemove', (e) => {
+            // 检查鼠标是否在任何全景图容器内
+            const target = e.target;
+            const panoramaElement = target.closest('.panorama-viewer') || 
+                                    target.closest('.pnlm-container') || 
+                                    target.tagName === 'CANVAS' && target.closest('.pnlm-container');
+            
+            const wasPreviouslyOver = isMouseOverPanorama;
+            isMouseOverPanorama = !!panoramaElement;
+            
+            // 仅当状态变化时通知父窗口
+            if (wasPreviouslyOver !== isMouseOverPanorama) {
+                try {
+                    window.parent.postMessage({
+                        type: 'panoramaMouseState',
+                        isOverPanorama: isMouseOverPanorama
+                    }, '*');
+                    
+                    console.log(`鼠标${isMouseOverPanorama ? '进入' : '离开'}全景图区域`);
+                } catch (e) {
+                    console.warn('向父窗口发送鼠标状态消息失败:', e);
+                }
+            }
+        });
+        
+        // 当鼠标离开文档时，通知父窗口
+        document.addEventListener('mouseleave', () => {
+            if (isMouseOverPanorama) {
+                isMouseOverPanorama = false;
+                try {
+                    window.parent.postMessage({
+                        type: 'panoramaMouseState', 
+                        isOverPanorama: false
+                    }, '*');
+                    console.log('鼠标离开文档，通知父窗口');
+                } catch (e) {
+                    console.warn('向父窗口发送鼠标离开消息失败:', e);
+                }
+            }
+        });
+        
         // 初始化
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', initCarousel);
@@ -1216,8 +1322,18 @@
             }, 500);
         });
         
-        // 向父窗口发送准备就绪消息
-        window.parent.postMessage('panoramaReady', '*');
+        // 监听父窗口消息
+        window.addEventListener('message', (event) => {
+            // 如果需要从父窗口接收指令
+            if (event.data && event.data.type === 'parentCommand') {
+                console.log('收到父窗口指令:', event.data);
+                
+                // 可以实现各种父窗口交互功能
+                if (event.data.command === 'scrollEnabled') {
+                    // 处理滚动启用指令
+                }
+            }
+        });
     </script>
 </body>
 </html>
