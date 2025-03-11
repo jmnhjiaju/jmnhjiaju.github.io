@@ -1,0 +1,1222 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全景图3D轮播</title>
+    <!-- 引入Pannellum库 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css">
+    <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #ffffff; /* 纯白背景 */
+        }
+        
+        .carousel-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+        
+        .carousel-wrapper {
+            position: relative;
+            width: 80%;
+            height: 60%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: visible;
+        }
+        
+        .carousel-item {
+            position: absolute;
+            width: 60%;
+            height: 100%;
+            overflow: hidden;
+            border-radius: 8px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            transition: all 0.8s cubic-bezier(0.42, 0, 0.58, 1);
+            cursor: pointer;
+            will-change: transform, opacity, filter;
+        }
+        
+        .carousel-item.center {
+            z-index: 5;
+            left: 20%;
+            transform: translateZ(0);
+            opacity: 1;
+            filter: blur(0);
+        }
+        
+        .carousel-item.left {
+            z-index: 3;
+            left: 0;
+            width: 60%; /* 保持原始宽度 */
+            transform: translateX(-66.67%) scale(0.8); /* 只露出1/3 */
+            opacity: 0.6;
+            filter: blur(2px);
+        }
+        
+        .carousel-item.right {
+            z-index: 3;
+            left: 40%; /* 调整位置 */
+            width: 60%; /* 保持原始宽度 */
+            transform: translateX(66.67%) scale(0.8); /* 只露出1/3 */
+            opacity: 0.6;
+            filter: blur(2px);
+        }
+        
+        /* 不可见的左侧和右侧项目 */
+        .carousel-item.far-left {
+            z-index: 1;
+            left: -20%;
+            width: 60%;
+            transform: translateX(-100%) scale(0.7);
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .carousel-item.far-right {
+            z-index: 1;
+            left: 60%;
+            width: 60%;
+            transform: translateX(100%) scale(0.7);
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .panorama-viewer {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* 指示器样式 */
+        .indicators {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: center;
+            z-index: 10;
+        }
+        
+        .indicator {
+            width: 12px;
+            height: 12px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 50%;
+            margin: 0 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .indicator.active {
+            background: #333;
+            transform: scale(1.2);
+        }
+        
+        /* 添加倒影效果 */
+        .carousel-wrapper::after {
+            content: "";
+            position: absolute;
+            width: 100%;
+            height: 20%;
+            bottom: -20%;
+            left: 0;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0));
+            pointer-events: none;
+            filter: blur(5px);
+            transform: scaleY(-1);
+        }
+        
+        /* 添加全屏、放大、缩小按钮样式 */
+        .panorama-controls {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column; /* 修改为纵向排列 */
+            gap: 10px;
+        }
+        
+        .panorama-control-btn {
+            width: 36px;
+            height: 36px;
+            background-color: rgba(0, 0, 0, 0.5);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            color: white;
+            font-size: 18px;
+            border: none;
+            outline: none;
+        }
+        
+        .panorama-control-btn:hover {
+            background-color: rgba(0, 0, 0, 0.7);
+        }
+        
+        /* 全屏模式样式 */
+        /* 当处于全屏模式时隐藏carousel的其他元素 */
+        body.is-fullscreen .carousel-item:not(.fullscreen-active) {
+            display: none !important;
+        }
+        
+        body.is-fullscreen .indicators {
+            display: none !important;
+        }
+        
+        /* 确保Pannellum容器在全屏模式下铺满整个屏幕 */
+        body.is-fullscreen .pnlm-container {
+            width: 100vw !important;
+            height: 100vh !important;
+        }
+        
+        /* 确保全屏元素铺满整个屏幕 */
+        .carousel-item.fullscreen-active {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            z-index: 9999 !important;
+            transform: none !important;
+            opacity: 1 !important;
+            filter: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="carousel-container">
+        <div class="carousel-wrapper" id="carouselWrapper"></div>
+        <div class="indicators" id="indicators"></div>
+    </div>
+
+    <script>
+        // 解析URL查询参数
+        function getQueryParams() {
+            const params = new URLSearchParams(window.location.search);
+            const result = [];
+            
+            // 查找所有img参数
+            for (let i = 1; i <= 10; i++) {  // 最多支持10张图片
+                const imgParam = params.get(`img${i}`);
+                if (imgParam) {
+                    result.push({
+                        id: `panorama-${i}`,
+                        src: decodeURIComponent(imgParam),
+                        title: params.get(`title${i}`) ? decodeURIComponent(params.get(`title${i}`)) : `全景图${i}`
+                    });
+                }
+            }
+            
+            // 如果没有找到任何参数，使用默认图片
+            if (result.length === 0) {
+                return [
+                    {
+                        id: 'panorama-1',
+                        src: 'https://pannellum.org/images/alma.jpg',
+                        title: '全景图1'
+                    },
+                    {
+                        id: 'panorama-2',
+                        src: 'https://pannellum.org/images/bma-1.jpg', 
+                        title: '全景图2'
+                    },
+                    {
+                        id: 'panorama-3',
+                        src: 'https://pannellum.org/images/jfk.jpg',
+                        title: '全景图3'
+                    },
+                    {
+                        id: 'panorama-4',
+                        src: 'https://pannellum.org/images/cerro-toco-0.jpg',
+                        title: '全景图4'
+                    },
+                    {
+                        id: 'panorama-5',
+                        src: 'https://pannellum.org/images/whirlpool.jpg',
+                        title: '全景图5'
+                    }
+                ];
+            }
+            
+            return result;
+        }
+        
+        // 全景图数据从URL参数获取
+        const panoramaImages = getQueryParams();
+        
+        let currentIndex = 0;
+        let panoramaViewers = [];
+        let lastSwitchTime = 0; // 记录上次切换时间
+        let autoPlayInterval; // 自动播放定时器
+        let isUserInteracting = false; // 用户是否正在操作
+        let hoverItem = null; // 当前悬停的项目
+        let hoverCheckInterval = null; // 悬停检查的定时器
+        let isAnimating = false; // 是否正在动画过渡中
+        let lastHoverItemId = null; // 上次悬停的项目ID
+        let rotationInterval; // 旋转定时器
+        let isCenterHovered = false; // 中间全景图是否被悬停
+        let autoPlayTimeoutId = null; // 自动播放超时ID
+        let isFullscreenMode = false; // 是否处于全屏模式
+        // 保存全屏前的视角状态
+        let savedViewerState = {
+            hfov: null,
+            pitch: null,
+            yaw: null,
+            index: null
+        };
+        // 阻止resize事件处理的标志
+        let preventResizeHandling = false;
+        // 全屏元素的引用
+        let fullscreenElement = null;
+        // 全屏时的全景图索引
+        let fullscreenIndex = -1;
+        
+        const carouselWrapper = document.getElementById('carouselWrapper');
+        const indicators = document.getElementById('indicators');
+        
+        // 初始化轮播图
+        function initCarousel() {
+            // 清空容器
+            carouselWrapper.innerHTML = '';
+            indicators.innerHTML = '';
+            panoramaViewers = [];
+            
+            // 创建全景图轮播项
+            panoramaImages.forEach((image, index) => {
+                // 创建轮播项
+                const item = document.createElement('div');
+                item.className = 'carousel-item';
+                item.id = `carousel-item-${index}`;
+                
+                // 创建全景图控制按钮容器
+                const controlsContainer = document.createElement('div');
+                controlsContainer.className = 'panorama-controls';
+                controlsContainer.id = `panorama-controls-${index}`;
+                
+                // 创建放大按钮 - 按要求顺序调整：放大、缩小、全屏
+                const zoomInBtn = document.createElement('button');
+                zoomInBtn.className = 'panorama-control-btn zoom-in-btn';
+                zoomInBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>';
+                zoomInBtn.title = "放大";
+                
+                // 创建缩小按钮
+                const zoomOutBtn = document.createElement('button');
+                zoomOutBtn.className = 'panorama-control-btn zoom-out-btn';
+                zoomOutBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>';
+                zoomOutBtn.title = "缩小";
+                
+                // 创建全屏按钮
+                const fullscreenBtn = document.createElement('button');
+                fullscreenBtn.className = 'panorama-control-btn fullscreen-btn';
+                fullscreenBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>';
+                fullscreenBtn.title = "全屏";
+                
+                // 将按钮按顺序添加到控制容器：放大、缩小、全屏
+                controlsContainer.appendChild(zoomInBtn);
+                controlsContainer.appendChild(zoomOutBtn);
+                controlsContainer.appendChild(fullscreenBtn);
+                
+                // 按钮事件处理
+                fullscreenBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleFullscreen(index);
+                });
+                
+                zoomInBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    zoomIn(index);
+                });
+                
+                zoomOutBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    zoomOut(index);
+                });
+                
+                // 初始时控制按钮只在中间项目显示
+                controlsContainer.style.display = index === currentIndex ? 'flex' : 'none';
+                
+                // 鼠标进入事件
+                item.addEventListener('mouseenter', () => {
+                    isUserInteracting = true;
+                    
+                    // 如果悬停的是中间项目
+                    if (index === currentIndex) {
+                        isCenterHovered = true;
+                        stopRotation(); // 停止旋转
+                    }
+                    
+                    const now = Date.now();
+                    const timeSinceLastSwitch = now - lastSwitchTime;
+                    
+                    // 如果是第一次悬停在这个项目，或者离开后再回来
+                    if (hoverItem !== index) {
+                        hoverItem = index;
+                        
+                        // 如果距离上次切换已经超过1.8秒，或者是从另一个项目移过来的，直接切换
+                        if (timeSinceLastSwitch >= 1800 || (lastHoverItemId !== null && lastHoverItemId !== index)) {
+                            if (!isAnimating && index !== currentIndex) {
+                                goToSlide(index);
+                                lastSwitchTime = now;
+                                stopAutoPlay(); // 停止自动播放
+                                lastHoverItemId = index;
+                            }
+                        }
+                        
+                        // 清除已有定时器
+                        if (hoverCheckInterval) {
+                            clearInterval(hoverCheckInterval);
+                        }
+                        
+                        // 设置新的检查定时器
+                        hoverCheckInterval = setInterval(() => {
+                            const currentTime = Date.now();
+                            if (hoverItem === index && currentTime - lastSwitchTime >= 1800 && !isAnimating) {
+                                if (index !== currentIndex) {
+                                    goToSlide(index);
+                                    lastSwitchTime = currentTime;
+                                    stopAutoPlay(); // 停止自动播放
+                                }
+                            }
+                        }, 200); // 每200ms检查一次
+                    }
+                });
+                
+                // 鼠标离开事件
+                item.addEventListener('mouseleave', () => {
+                    // 如果离开的是中间项目
+                    if (index === currentIndex) {
+                        isCenterHovered = false;
+                        checkAndStartRotation(); // 检查并开始旋转
+                    }
+                    
+                    // 如果离开的是当前悬停项
+                    if (hoverItem === index) {
+                        lastHoverItemId = hoverItem; // 记住离开的是哪个项目
+                        hoverItem = null;
+                    }
+                    
+                    // 如果所有项目都没有悬停，清除定时器
+                    if (!document.querySelector('.carousel-item:hover')) {
+                        if (hoverCheckInterval) {
+                            clearInterval(hoverCheckInterval);
+                            hoverCheckInterval = null;
+                        }
+                        
+                        // 延迟标记用户不再交互
+                        setTimeout(() => {
+                            if (!document.querySelector('.carousel-item:hover')) {
+                                isUserInteracting = false;
+                                
+                                // 如果动画已结束，恢复自动播放
+                                if (!isAnimating) {
+                                    startAutoPlay();
+                                }
+                            }
+                        }, 1000);
+                    }
+                });
+                
+                // 监测用户交互开始
+                item.addEventListener('mousedown', () => {
+                    isUserInteracting = true;
+                    stopAutoPlay(); // 停止自动播放
+                    
+                    // 如果是中间项目
+                    if (index === currentIndex) {
+                        stopRotation(); // 停止旋转
+                    }
+                });
+                
+                // 创建全景图容器
+                const panoramaContainer = document.createElement('div');
+                panoramaContainer.className = 'panorama-viewer';
+                panoramaContainer.id = image.id;
+                item.appendChild(panoramaContainer);
+                
+                // 添加控制按钮
+                item.appendChild(controlsContainer);
+                
+                // 添加全景图交互监听
+                panoramaContainer.addEventListener('mousedown', () => {
+                    isUserInteracting = true;
+                    stopAutoPlay();
+                    
+                    // 如果是中间项目
+                    if (index === currentIndex) {
+                        stopRotation();
+                    }
+                });
+                
+                // 添加到轮播容器
+                carouselWrapper.appendChild(item);
+                
+                // 创建指示器
+                const indicator = document.createElement('div');
+                indicator.className = 'indicator';
+                indicator.addEventListener('click', () => {
+                    if (isAnimating) return;
+                    isUserInteracting = true;
+                    goToSlide(index);
+                    lastSwitchTime = Date.now();
+                    lastHoverItemId = index;
+                    stopAutoPlay(); // 停止自动播放
+                    
+                    // 点击后5秒如果没有其他交互，恢复自动播放
+                    setTimeout(() => {
+                        if (!document.querySelector('.carousel-item:hover')) {
+                            isUserInteracting = false;
+                            if (!isAnimating) {
+                                startAutoPlay();
+                            }
+                        }
+                    }, 5000);
+                });
+                indicators.appendChild(indicator);
+                
+                // 在单独的作用域中初始化全景图，避免异步问题
+                (function(idx) {
+                    setTimeout(() => {
+                        try {
+                            const viewer = pannellum.viewer(image.id, {
+                                type: 'equirectangular',
+                                panorama: image.src,
+                                autoLoad: true,
+                                showFullscreenCtrl: false,
+                                showControls: false,
+                                hfov: 110,
+                                mouseZoom: true,
+                                friction: 0.2,
+                                crossOrigin: 'anonymous'
+                            });
+                            
+                            panoramaViewers[idx] = viewer;
+                            
+                            // 监听全景图交互
+                            viewer.on('mousedown', () => {
+                                isUserInteracting = true;
+                                stopAutoPlay();
+                                
+                                // 如果是中间项目
+                                if (idx === currentIndex) {
+                                    stopRotation();
+                                }
+                            });
+                            
+                            // 防止滚动事件冒泡
+                            document.getElementById(image.id).addEventListener('wheel', (e) => {
+                                e.stopPropagation();
+                                isUserInteracting = true;
+                                stopAutoPlay();
+                                
+                                // 如果是中间项目
+                                if (idx === currentIndex) {
+                                    stopRotation();
+                                }
+                                
+                                // 5秒后恢复自动播放
+                                setTimeout(() => {
+                                    if (!document.querySelector('.carousel-item:hover')) {
+                                        isUserInteracting = false;
+                                        if (!isAnimating) {
+                                            startAutoPlay();
+                                            checkAndStartRotation();
+                                        }
+                                    }
+                                }, 5000);
+                            }, { passive: false });
+                            
+                        } catch (err) {
+                            console.error(`初始化全景图 ${image.id} 失败:`, err);
+                        }
+                    }, 100);
+                })(index);
+            });
+            
+            // 初始化轮播状态
+            updateCarousel();
+            
+            // 开始自动播放和旋转
+            startAutoPlay();
+            
+            // 初始化时中间项目没有被悬停
+            isCenterHovered = false;
+            checkAndStartRotation();
+        }
+        
+        // 保存当前全景图状态
+        function saveViewerState(index) {
+            const viewer = panoramaViewers[index];
+            if (viewer) {
+                savedViewerState = {
+                    hfov: viewer.getHfov(),
+                    pitch: viewer.getPitch(),
+                    yaw: viewer.getYaw(),
+                    index: index
+                };
+                console.log('保存全景图状态:', savedViewerState);
+            }
+        }
+        
+        // 恢复全景图状态
+        function restoreViewerState(index) {
+            if (savedViewerState && savedViewerState.index === index) {
+                const viewer = panoramaViewers[index];
+                if (viewer) {
+                    // 设置阻止处理resize事件的标志
+                    preventResizeHandling = true;
+                    
+                    // 设置回原来的视角参数
+                    viewer.setPitch(savedViewerState.pitch);
+                    viewer.setYaw(savedViewerState.yaw);
+                    viewer.setHfov(savedViewerState.hfov);
+                    
+                    console.log('恢复全景图状态:', savedViewerState);
+                    
+                    // 短暂延迟后允许处理resize事件
+                    setTimeout(() => {
+                        preventResizeHandling = false;
+                    }, 300);
+                }
+            }
+        }
+        
+        // 检查浏览器对全屏API的支持
+        function getFullscreenAPI() {
+            const apis = {
+                requestFullscreen: ['requestFullscreen', 'webkitRequestFullscreen', 'mozRequestFullScreen', 'msRequestFullscreen'],
+                exitFullscreen: ['exitFullscreen', 'webkitExitFullscreen', 'mozCancelFullScreen', 'msExitFullscreen'],
+                fullscreenElement: ['fullscreenElement', 'webkitFullscreenElement', 'mozFullScreenElement', 'msFullscreenElement'],
+                fullscreenEnabled: ['fullscreenEnabled', 'webkitFullscreenEnabled', 'mozFullScreenEnabled', 'msFullscreenEnabled'],
+                fullscreenchange: ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'],
+                fullscreenerror: ['fullscreenerror', 'webkitfullscreenerror', 'mozfullscreenerror', 'MSFullscreenError']
+            };
+            
+            const api = {};
+            
+            // 请求全屏
+            for (const method of apis.requestFullscreen) {
+                if (document.documentElement[method]) {
+                    api.requestFullscreen = method;
+                    break;
+                }
+            }
+            
+            // 退出全屏
+            for (const method of apis.exitFullscreen) {
+                if (document[method]) {
+                    api.exitFullscreen = method;
+                    break;
+                }
+            }
+            
+            // 当前全屏元素
+            for (const prop of apis.fullscreenElement) {
+                if (document[prop] !== undefined) {
+                    api.fullscreenElement = prop;
+                    break;
+                }
+            }
+            
+            // 全屏是否可用
+            for (const prop of apis.fullscreenEnabled) {
+                if (document[prop] !== undefined) {
+                    api.fullscreenEnabled = prop;
+                    break;
+                }
+            }
+            
+            // 全屏变化事件
+            for (const event of apis.fullscreenchange) {
+                if (`on${event}` in document) {
+                    api.fullscreenchange = event;
+                    break;
+                }
+            }
+            
+            // 全屏错误事件
+            for (const event of apis.fullscreenerror) {
+                if (`on${event}` in document) {
+                    api.fullscreenerror = event;
+                    break;
+                }
+            }
+            
+            return api;
+        }
+        
+        // 获取浏览器全屏API
+        const fullscreenAPI = getFullscreenAPI();
+        
+        // 切换全屏显示 - 完全重写此函数，使用浏览器全屏API
+        function toggleFullscreen(index) {
+            isUserInteracting = true;
+            stopAutoPlay();
+            stopRotation();
+            
+            const item = document.getElementById(`carousel-item-${index}`);
+            const panoramaContainer = document.querySelector(`#carousel-item-${index} .panorama-viewer`);
+            
+            if (!isFullscreenMode) {
+                // 进入全屏模式
+                enterFullscreen(item, index);
+            } else {
+                // 退出全屏模式
+                exitFullscreen();
+            }
+        }
+        
+        // 进入全屏模式 - 新函数，处理进入全屏
+        function enterFullscreen(element, index) {
+            // 保存视角状态
+            saveViewerState(index);
+            
+            // 保存当前全屏元素和索引
+            fullscreenElement = element;
+            fullscreenIndex = index;
+            
+            // 标记全屏状态
+            isFullscreenMode = true;
+            
+            // 添加全屏激活类
+            element.classList.add('fullscreen-active');
+            document.body.classList.add('is-fullscreen');
+            
+            // 修改全屏按钮图标
+            const fullscreenBtn = element.querySelector('.fullscreen-btn');
+            if (fullscreenBtn) {
+                fullscreenBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6m0 0v6m0-6l-7 7m17-11h-6m0 0V4m0 6l7-7"></path></svg>';
+                fullscreenBtn.title = "退出全屏";
+            }
+            
+            // 使用浏览器全屏API - 这是关键步骤
+            if (fullscreenAPI.requestFullscreen) {
+                try {
+                    element[fullscreenAPI.requestFullscreen]().then(() => {
+                        // 全屏成功后调整全景图大小
+                        setTimeout(() => {
+                            if (panoramaViewers[index]) {
+                                panoramaViewers[index].resize();
+                                
+                                setTimeout(() => {
+                                    restoreViewerState(index);
+                                }, 100);
+                            }
+                        }, 100);
+                    }).catch(err => {
+                        console.error('请求全屏失败:', err);
+                        // 失败后回滚状态
+                        exitFullscreen();
+                    });
+                } catch (err) {
+                    console.error('请求全屏出错:', err);
+                    // 失败后回滚状态
+                    exitFullscreen();
+                }
+            }
+            
+            // 添加全屏变化监听
+            document.addEventListener(fullscreenAPI.fullscreenchange, handleFullscreenChange);
+        }
+        
+        // 处理全屏变化事件
+        function handleFullscreenChange() {
+            // 检查是否真的退出了全屏
+            if (!document[fullscreenAPI.fullscreenElement]) {
+                // 如果已经不在全屏模式中，但我们的状态还是全屏，则执行退出全屏逻辑
+                if (isFullscreenMode) {
+                    exitFullscreen();
+                }
+            } else if (isFullscreenMode) {
+                // 全屏模式下，确保全景图正确调整大小
+                if (fullscreenIndex >= 0 && panoramaViewers[fullscreenIndex]) {
+                    setTimeout(() => {
+                        panoramaViewers[fullscreenIndex].resize();
+                    }, 100);
+                }
+            }
+        }
+        
+        // 退出全屏模式 - 重写此函数
+        function exitFullscreen() {
+            if (!isFullscreenMode) return;
+            
+            // 如果是浏览器全屏状态，先退出浏览器全屏
+            if (document[fullscreenAPI.fullscreenElement] && document[fullscreenAPI.exitFullscreen]) {
+                document[fullscreenAPI.exitFullscreen]().catch(err => {
+                    console.error('退出全屏失败:', err);
+                });
+            }
+            
+            // 保存全屏元素的视角状态
+            if (fullscreenIndex >= 0) {
+                saveViewerState(fullscreenIndex);
+            }
+            
+            // 移除全屏状态类
+            if (fullscreenElement) {
+                fullscreenElement.classList.remove('fullscreen-active');
+                
+                // 修改全屏按钮图标
+                const fullscreenBtn = fullscreenElement.querySelector('.fullscreen-btn');
+                if (fullscreenBtn) {
+                    fullscreenBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>';
+                    fullscreenBtn.title = "全屏";
+                }
+            }
+            
+            document.body.classList.remove('is-fullscreen');
+            
+            // 重置全屏状态
+            isFullscreenMode = false;
+            
+            // 移除全屏变化监听
+            document.removeEventListener(fullscreenAPI.fullscreenchange, handleFullscreenChange);
+            
+            // 短暂延迟后更新轮播和恢复状态
+            setTimeout(() => {
+                // 更新轮播状态以强制重新计算尺寸
+                updateCarousel();
+                
+                // 等待布局调整完成后恢复视角
+                setTimeout(() => {
+                    if (fullscreenIndex >= 0 && panoramaViewers[fullscreenIndex]) {
+                        panoramaViewers[fullscreenIndex].resize();
+                        restoreViewerState(fullscreenIndex);
+                    }
+                    
+                    // 清除全屏元素引用
+                    fullscreenElement = null;
+                    fullscreenIndex = -1;
+                    
+                    // 恢复自动播放和旋转
+                    if (!document.querySelector('.carousel-item:hover')) {
+                        isUserInteracting = false;
+                        startAutoPlay();
+                        checkAndStartRotation();
+                    }
+                }, 300);
+            }, 100);
+        }
+        
+        // 监听ESC键退出全屏
+        document.addEventListener('keydown', exitFullscreenOnEsc);
+        
+        // ESC键退出全屏
+        function exitFullscreenOnEsc(e) {
+            if (e.key === 'Escape' && isFullscreenMode) {
+                exitFullscreen();
+            }
+        }
+        
+        // 放大全景图
+        function zoomIn(index) {
+            if (panoramaViewers[index]) {
+                isUserInteracting = true;
+                stopAutoPlay();
+                stopRotation();
+                
+                // 获取当前视场角度
+                const currentHfov = panoramaViewers[index].getHfov();
+                // 设置新的视场角度 (缩小视场角度意味着放大视图)
+                panoramaViewers[index].setHfov(Math.max(currentHfov - 10, 30));
+                
+                // 5秒后恢复自动播放
+                setTimeout(() => {
+                    if (!document.querySelector('.carousel-item:hover') && !isFullscreenMode) {
+                        isUserInteracting = false;
+                        startAutoPlay();
+                        checkAndStartRotation();
+                    }
+                }, 5000);
+            }
+        }
+        
+        // 缩小全景图
+        function zoomOut(index) {
+            if (panoramaViewers[index]) {
+                isUserInteracting = true;
+                stopAutoPlay();
+                stopRotation();
+                
+                // 获取当前视场角度
+                const currentHfov = panoramaViewers[index].getHfov();
+                // 设置新的视场角度 (增加视场角度意味着缩小视图)
+                panoramaViewers[index].setHfov(Math.min(currentHfov + 10, 120));
+                
+                // 5秒后恢复自动播放
+                setTimeout(() => {
+                    if (!document.querySelector('.carousel-item:hover') && !isFullscreenMode) {
+                        isUserInteracting = false;
+                        startAutoPlay();
+                        checkAndStartRotation();
+                    }
+                }, 5000);
+            }
+        }
+        
+        // 根据悬停状态检查并开始旋转
+        function checkAndStartRotation() {
+            if (!isCenterHovered && !isAnimating && !isFullscreenMode) {
+                startRotation();
+            }
+        }
+        
+        // 开始自动播放
+        function startAutoPlay() {
+            if (isFullscreenMode) return; // 全屏模式下不自动播放
+            
+            stopAutoPlay(); // 先停止可能存在的定时器和超时
+            
+            // 使用setTimeout而不是setInterval来确保定时器之间不会重叠
+            function scheduleNextSlide() {
+                autoPlayTimeoutId = setTimeout(() => {
+                    if (!isUserInteracting && !isAnimating && !isFullscreenMode) {
+                        goToNext();
+                    }
+                    
+                    // 无论如何，都安排下一次切换
+                    if (!isUserInteracting && !isFullscreenMode) {
+                        scheduleNextSlide();
+                    }
+                }, 6000);
+            }
+            
+            // 启动定时器序列
+            scheduleNextSlide();
+            
+            console.log("自动播放已启动");
+        }
+        
+        // 停止自动播放
+        function stopAutoPlay() {
+            if (autoPlayInterval) {
+                clearInterval(autoPlayInterval);
+                autoPlayInterval = null;
+            }
+            
+            if (autoPlayTimeoutId) {
+                clearTimeout(autoPlayTimeoutId);
+                autoPlayTimeoutId = null;
+            }
+            
+            console.log("自动播放已停止");
+        }
+        
+        // 开始旋转
+        function startRotation() {
+            stopRotation(); // 先停止可能存在的旋转
+            
+            // 只有当中间项目没有被悬停且不在全屏模式时才开始旋转
+            if (!isCenterHovered && !isFullscreenMode) {
+                rotationInterval = setInterval(() => {
+                    if (!isUserInteracting && !isAnimating && !isCenterHovered && !isFullscreenMode) {
+                        const viewer = panoramaViewers[currentIndex];
+                        if (viewer) {
+                            let currentYaw = viewer.getYaw();
+                            viewer.setYaw(currentYaw + 10); // 每100ms旋转1度，相当于每秒10度
+                        }
+                    }
+                }, 100);
+            }
+        }
+        
+        // 停止旋转
+        function stopRotation() {
+            if (rotationInterval) {
+                clearInterval(rotationInterval);
+                rotationInterval = null;
+            }
+        }
+        
+        // 更新轮播状态
+        function updateCarousel() {
+            isAnimating = true;
+            const itemCount = panoramaImages.length;
+            
+            // 清除中间项目悬停标记，因为项目位置变了
+            isCenterHovered = false;
+            
+            // 计算各个位置的索引
+            const leftFarIndex = (currentIndex - 2 + itemCount) % itemCount;
+            const leftIndex = (currentIndex - 1 + itemCount) % itemCount;
+            const rightIndex = (currentIndex + 1) % itemCount;
+            const rightFarIndex = (currentIndex + 2) % itemCount;
+            
+            // 更新所有项目的类名和显示状态
+            for (let i = 0; i < itemCount; i++) {
+                const item = document.getElementById(`carousel-item-${i}`);
+                const indicator = indicators.children[i];
+                const controls = document.getElementById(`panorama-controls-${i}`);
+                
+                // 跳过全屏模式下的项目
+                if (isFullscreenMode && item.classList.contains('fullscreen-active')) {
+                    continue;
+                }
+                
+                // 移除所有类
+                item.classList.remove('left', 'center', 'right', 'far-left', 'far-right');
+                indicator.classList.remove('active');
+                
+                // 只在中心项目显示控制按钮
+                if (controls) {
+                    controls.style.display = i === currentIndex ? 'flex' : 'none';
+                }
+                
+                // 根据相对位置设置类名
+                if (i === currentIndex) {
+                    item.classList.add('center');
+                    indicator.classList.add('active');
+                    item.style.display = 'block';
+                    
+                    // 检查新的中心项目是否正在被悬停
+                    if (item.matches(':hover')) {
+                        isCenterHovered = true;
+                    }
+                } else if (i === leftIndex) {
+                    item.classList.add('left');
+                    item.style.display = 'block';
+                } else if (i === rightIndex) {
+                    item.classList.add('right');
+                    item.style.display = 'block';
+                } else if (i === leftFarIndex) {
+                    item.classList.add('far-left');
+                    item.style.display = 'block'; // 虽然不可见但还是要显示
+                } else if (i === rightFarIndex) {
+                    item.classList.add('far-right');
+                    item.style.display = 'block'; // 虽然不可见但还是要显示
+                } else {
+                    item.style.display = 'none';
+                }
+            }
+            
+            // 重新调整全景图大小
+            setTimeout(() => {
+                panoramaViewers.forEach((viewer, index) => {
+                    const item = document.getElementById(`carousel-item-${index}`);
+                    
+                    // 跳过全屏模式下的项目
+                    if (isFullscreenMode && item.classList.contains('fullscreen-active')) {
+                        return;
+                    }
+                    
+                    if (item.style.display === 'block' && viewer && typeof viewer.resize === 'function') {
+                        try {
+                            viewer.resize();
+                        } catch (e) {
+                            console.warn(`调整全景图 ${index} 大小失败:`, e);
+                        }
+                    }
+                });
+                
+                // 动画结束后更新状态
+                setTimeout(() => {
+                    isAnimating = false;
+                    
+                    // 检查中间项目是否被悬停，如果没有则开始旋转
+                    checkAndStartRotation();
+                    
+                    // 如果用户不在交互，确保自动播放正在运行
+                    if (!isUserInteracting && autoPlayTimeoutId === null && !isFullscreenMode) {
+                        startAutoPlay();
+                    }
+                }, 100);
+            }, 850); // 等动画完成后调整大小
+        }
+        
+        // 切换到指定轮播图
+        function goToSlide(index) {
+            if (index === currentIndex || isAnimating) return;
+            stopRotation(); // 停止当前的旋转
+            
+            // 全屏模式下先退出全屏
+            if (isFullscreenMode) {
+                exitFullscreen();
+                setTimeout(() => {
+                    currentIndex = index;
+                    updateCarousel();
+                }, 300);
+            } else {
+                currentIndex = index;
+                updateCarousel();
+            }
+        }
+        
+        // 切换到下一张
+        function goToNext() {
+            if (isAnimating || isFullscreenMode) return;
+            stopRotation(); // 停止当前的旋转
+            currentIndex = (currentIndex + 1) % panoramaImages.length;
+            updateCarousel();
+            console.log("已切换到下一张：", currentIndex);
+        }
+        
+        // 切换到上一张
+        function goToPrev() {
+            if (isAnimating || isFullscreenMode) return;
+            stopRotation(); // 停止当前的旋转
+            currentIndex = (currentIndex - 1 + panoramaImages.length) % panoramaImages.length;
+            updateCarousel();
+        }
+        
+        // 窗口调整大小时重新计算
+        window.addEventListener('resize', () => {
+            // 如果设置了阻止处理resize事件的标志，则跳过处理
+            if (preventResizeHandling) {
+                console.log('跳过resize处理');
+                return;
+            }
+            
+            // 只调整当前显示的全景图大小
+            const visibleItems = document.querySelectorAll('.carousel-item[style*="display: block"], .carousel-item.fullscreen-active');
+            visibleItems.forEach(item => {
+                const index = parseInt(item.id.replace('carousel-item-', ''));
+                const viewer = panoramaViewers[index];
+                if (viewer && typeof viewer.resize === 'function') {
+                    try {
+                        // 如果是全屏模式下调整大小，则保持视角不变
+                        if (isFullscreenMode && item.classList.contains('fullscreen-active')) {
+                            // 保存当前视角
+                            const currentHfov = viewer.getHfov();
+                            const currentPitch = viewer.getPitch();
+                            const currentYaw = viewer.getYaw();
+                            
+                            // 调整大小
+                            viewer.resize();
+                            
+                            // 恢复视角
+                            viewer.setPitch(currentPitch);
+                            viewer.setYaw(currentYaw);
+                            viewer.setHfov(currentHfov);
+                        } else {
+                            viewer.resize();
+                        }
+                    } catch (e) {
+                        console.warn(`调整全景图 ${index} 大小失败:`, e);
+                    }
+                }
+            });
+        });
+        
+        // 禁止文档滚动
+        document.addEventListener('wheel', (e) => {
+            const target = e.target;
+            const isPanorama = target.closest('.panorama-viewer');
+            
+            if (!isPanorama) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+        
+        // 键盘控制
+        document.addEventListener('keydown', (e) => {
+            if (isAnimating) return;
+            
+            isUserInteracting = true;
+            stopAutoPlay();
+            stopRotation();
+            
+            const now = Date.now();
+            if (now - lastSwitchTime < 1800) return; // 限制切换频率为1.8秒
+            
+            if (e.key === 'ArrowLeft') {
+                if (!isFullscreenMode) {
+                    goToPrev();
+                    lastSwitchTime = now;
+                }
+            } else if (e.key === 'ArrowRight') {
+                if (!isFullscreenMode) {
+                    goToNext();
+                    lastSwitchTime = now;
+                }
+            }
+            
+            // 5秒后如果没有其他交互，恢复自动播放
+            setTimeout(() => {
+                if (!document.querySelector('.carousel-item:hover') && !isFullscreenMode) {
+                    isUserInteracting = false;
+                    if (!isAnimating) {
+                        startAutoPlay();
+                        checkAndStartRotation();
+                    }
+                }
+            }, 5000);
+        });
+        
+        // 监听过渡动画结束
+        carouselWrapper.addEventListener('transitionend', (e) => {
+            if (e.target.classList.contains('carousel-item')) {
+                isAnimating = false;
+                if (!document.querySelector('.carousel-item:hover') && !isFullscreenMode) {
+                    isUserInteracting = false;
+                    if (autoPlayTimeoutId === null) {
+                        startAutoPlay();
+                    }
+                    checkAndStartRotation();
+                }
+            }
+        });
+        
+        // 初始化
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initCarousel);
+        } else {
+            initCarousel();
+        }
+        
+        // 当页面不可见时暂停自动播放和旋转
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopAutoPlay();
+                stopRotation();
+            } else {
+                if (!document.querySelector('.carousel-item:hover') && !isFullscreenMode) {
+                    isUserInteracting = false;
+                    startAutoPlay();
+                    checkAndStartRotation();
+                }
+            }
+        });
+        
+        // 监听全局鼠标抬起事件
+        document.addEventListener('mouseup', () => {
+            setTimeout(() => {
+                if (!document.querySelector('.carousel-item:hover') && !isFullscreenMode) {
+                    isUserInteracting = false;
+                    if (!isAnimating) {
+                        if (autoPlayTimeoutId === null) {
+                            startAutoPlay();
+                        }
+                        checkAndStartRotation();
+                    }
+                }
+            }, 500);
+        });
+    </script>
+</body>
+</html>
