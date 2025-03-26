@@ -461,7 +461,7 @@
                     } else {
                         showError('初始化轮播图失败，请刷新页面重试');
                     }
-                }, 1000);
+                }, 3000);
             }
         })
         .catch(error => {
@@ -484,7 +484,7 @@
                     console.warn('强制调用initCarousel');
                     window.initCarousel();
                 }
-            }, 3000); // 3秒后检查
+            }, 3000); // 4秒后检查
         });
     </script>
 </head>
@@ -518,10 +518,11 @@
         const currentIframeId = getIframeId();
         console.log('当前iframe ID:', currentIframeId);
         
-        // 解析URL查询参数
+        // 获取URL查询参数
         function getQueryParams() {
             const params = new URLSearchParams(window.location.search);
             const result = [];
+            const lazyLoad = params.get('lazyLoad') === 'true'; // 获取懒加载参数
             
             // 查找所有img参数
             for (let i = 1; i <= 10; i++) {  // 最多支持10张图片
@@ -530,7 +531,9 @@
                     result.push({
                         id: `panorama-${i}-${currentIframeId}`, // 添加iframe ID确保唯一
                         src: decodeURIComponent(imgParam),
-                        title: params.get(`title${i}`) ? decodeURIComponent(params.get(`title${i}`)) : `全景图${i}`
+                        title: params.get(`title${i}`) ? decodeURIComponent(params.get(`title${i}`)) : `全景图${i}`,
+                        loaded: false, // 添加加载状态标记
+                        loadPriority: i === 1 ? 'high' : 'low' // 第一张图优先加载
                     });
                 }
             }
@@ -564,16 +567,43 @@
             return result;
         }
         
-        // 预加载图片，确保链接有效
-        function preloadImage(url) {
+        // 预加载图片，增加重试机制
+        function preloadImage(url, retryCount = 0, maxRetries = 3) {
             return new Promise((resolve, reject) => {
                 const img = new Image();
+                
                 img.onload = () => resolve(url);
-                img.onerror = () => reject(new Error(`图片加载失败: ${url}`));
+                
+                img.onerror = () => {
+                    if (retryCount < maxRetries) {
+                        console.log(`图片加载失败，正在重试(${retryCount + 1}/${maxRetries}): ${url}`);
+                        // 指数退避策略，每次重试等待时间增加
+                        setTimeout(() => {
+                            preloadImage(url, retryCount + 1, maxRetries)
+                                .then(resolve)
+                                .catch(reject);
+                        }, 2000 * Math.pow(2, retryCount));
+                    } else {
+                        reject(new Error(`图片加载失败(已重试${maxRetries}次): ${url}`));
+                    }
+                };
+                
                 img.src = url;
                 
-                // 5秒超时
-                setTimeout(() => reject(new Error(`图片加载超时: ${url}`)), 5000);
+                // 8秒超时，增加超时时间
+                setTimeout(() => {
+                    if (!img.complete) {
+                        img.src = ''; // 取消加载
+                        if (retryCount < maxRetries) {
+                            console.log(`图片加载超时，正在重试(${retryCount + 1}/${maxRetries}): ${url}`);
+                            preloadImage(url, retryCount + 1, maxRetries)
+                                .then(resolve)
+                                .catch(reject);
+                        } else {
+                            reject(new Error(`图片加载超时(已重试${maxRetries}次): ${url}`));
+                        }
+                    }
+                }, 8000);
             });
         }
         
@@ -835,7 +865,7 @@
                     lastHoverItemId = index;
                     stopAutoPlay(); // 停止自动播放
                     
-                    // 点击后5秒如果没有其他交互，恢复自动播放
+                    // 点击后3秒如果没有其他交互，恢复自动播放
                     setTimeout(() => {
                         if (!document.querySelector('.carousel-item:hover')) {
                             isUserInteracting = false;
@@ -843,7 +873,7 @@
                                 startAutoPlay();
                             }
                         }
-                    }, 5000);
+                    }, 3000);
                 });
                 indicators.appendChild(indicator);
             });
@@ -877,23 +907,53 @@
         
         // 分批初始化全景图，避免同时创建太多实例
         function initializePanoramas() {
-            const initBatch = (startIndex, endIndex) => {
-                for (let i = startIndex; i <= endIndex && i < panoramaImages.length; i++) {
-                    initializePanorama(i);
+            // 首先初始化第一张、第二张和最后一张全景图
+            if (panoramaImages.length > 0) {
+                // 初始化第一张
+                initializePanorama(0);
+                
+                // 如果有第二张，初始化第二张
+                if (panoramaImages.length > 1) {
+                    setTimeout(() => {
+                        initializePanorama(1);
+                    }, 400);
                 }
                 
-                // 如果还有更多全景图需要初始化，继续下一批
-                if (endIndex + 1 < panoramaImages.length) {
+                // 如果有三张或以上，初始化最后一张
+                if (panoramaImages.length > 2) {
                     setTimeout(() => {
-                        initBatch(endIndex + 1, endIndex + 3);
-                    }, 300);
+                        initializePanorama(panoramaImages.length - 1);
+                    }, 800);
                 }
-            };
+            }
             
-            // 从第一批开始初始化（最多3个）
-            initBatch(0, Math.min(2, panoramaImages.length - 1));
+            // 然后延迟加载其他全景图（跳过已经初始化的图片）
+            setTimeout(() => {
+                const initBatch = (startIndex, endIndex) => {
+                    for (let i = startIndex; i <= endIndex && i < panoramaImages.length; i++) {
+                        // 跳过已经初始化的
+                        if (i === 0 || i === 1 || i === panoramaImages.length - 1 || panoramaImages[i].loaded) continue;
+                        
+                        setTimeout(() => {
+                            initializePanorama(i);
+                        }, (i - startIndex) * 1000); // 每个全景图之间间隔1秒
+                    }
+                    
+                    // 如果还有更多全景图需要初始化，继续下一批
+                    if (endIndex + 1 < panoramaImages.length) {
+                        setTimeout(() => {
+                            initBatch(endIndex + 1, endIndex + 2); // 每批最多加载2个
+                        }, 1000); // 批次之间间隔1秒
+                    }
+                };
+                
+                // 从第三张开始加载剩余的全景图（如果有的话）
+                if (panoramaImages.length > 2) {
+                    initBatch(2, 3);
+                }
+            }, 1000);
         }
-        
+    
         // 初始化单个全景图
         function initializePanorama(index) {
             const image = panoramaImages[index];
@@ -907,8 +967,8 @@
             }
             
             try {
-                // 先预加载图片
-                preloadImage(image.src)
+                // 先预加载图片，添加重试机制
+                preloadImage(image.src, 0, 3)
                     .then(() => {
                         // 图片预加载成功，创建全景图
                         console.log(`图片预加载成功: ${image.src}`);
@@ -928,6 +988,9 @@
                                 });
                                 
                                 panoramaViewers[index] = viewer;
+                                image.loaded = true; // 标记为已加载
+                                
+                                // ... 现有代码 ...
                                 
                                 // 监听全景图交互
                                 viewer.on('mousedown', () => {
@@ -970,20 +1033,20 @@
                                 // 尝试延迟重新初始化
                                 setTimeout(() => {
                                     initializePanorama(index);
-                                }, 1000);
+                                }, 5000); // 增加重试间隔
                             }
                         }
                     })
                     .catch(err => {
                         console.error(`图片预加载失败: ${image.src}`, err);
                         
-                        // 替换为备用图片
+                        // 替换为备用图片或显示错误信息
                         image.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjVmNWY1Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgZmlsbD0iIzk5OSI+5Zu+54mH5Yqg6L295aSx6LSlPC90ZXh0Pjwvc3ZnPg==';
                         
-                        // 重试初始化
+                        // 重试初始化，使用更长的延迟
                         setTimeout(() => {
                             initializePanorama(index);
-                        }, 500);
+                        }, 8000);
                     });
             } catch (err) {
                 console.error(`初始化全景图异常 ${image.id}:`, err);
@@ -991,8 +1054,7 @@
                 // 确保最终移除加载遮罩
                 setTimeout(removeLoadingOverlay, 5000);
             }
-        }
-        
+        }        
         // 将消息发送给父窗口
         function sendReadyMessageToParent() {
             try {
@@ -1051,7 +1113,7 @@
                         viewer.setHfov(newHfov);
                     }
                     
-                    // 5秒后恢复自动播放
+                    // 3秒后恢复自动播放
                     setTimeout(() => {
                         if (!document.querySelector('.carousel-item:hover') && !isFullscreenMode) {
                             isUserInteracting = false;
@@ -1060,7 +1122,7 @@
                                 checkAndStartRotation();
                             }
                         }
-                    }, 5000);
+                    }, 3000);
                 };
                 
                 // 存储处理函数引用，以便稍后可以移除
@@ -1372,14 +1434,14 @@
                     console.error('放大全景图失败:', e);
                 }
                 
-                // 5秒后恢复自动播放
+                // 3秒后恢复自动播放
                 setTimeout(() => {
                     if (!document.querySelector('.carousel-item:hover') && !isFullscreenMode) {
                         isUserInteracting = false;
                         startAutoPlay();
                         checkAndStartRotation();
                     }
-                }, 5000);
+                }, 3000);
             }
         }
         
@@ -1399,14 +1461,14 @@
                     console.error('缩小全景图失败:', e);
                 }
                 
-                // 5秒后恢复自动播放
+                // 3秒后恢复自动播放
                 setTimeout(() => {
                     if (!document.querySelector('.carousel-item:hover') && !isFullscreenMode) {
                         isUserInteracting = false;
                         startAutoPlay();
                         checkAndStartRotation();
                     }
-                }, 5000);
+                }, 3000);
             }
         }
         
@@ -1470,7 +1532,7 @@
                         if (viewer) {
                             try {
                                 let currentYaw = viewer.getYaw();
-                                viewer.setYaw(currentYaw + 10); // 每100ms旋转0.1度，降低旋转速度避免卡顿
+                                viewer.setYaw(currentYaw + 5); // 每100ms旋转0.1度，降低旋转速度避免卡顿
                             } catch (e) {
                                 console.warn('旋转全景图时出错:', e);
                             }
@@ -1704,7 +1766,7 @@
                 }
             }
             
-            // 5秒后如果没有其他交互，恢复自动播放
+            // 3秒后如果没有其他交互，恢复自动播放
             setTimeout(() => {
                 if (!document.querySelector('.carousel-item:hover') && !isFullscreenMode) {
                     isUserInteracting = false;
@@ -1713,7 +1775,7 @@
                         checkAndStartRotation();
                     }
                 }
-            }, 5000);
+            }, 3000);
         });
         
         // 监听过渡动画结束
@@ -1811,7 +1873,36 @@
             // 如果需要从父窗口接收指令
             if (event.data && event.data.type === 'parentCommand') {
                 console.log('收到父窗口指令:', event.data);
+                // 处理可见性变化
+                if (event.data.command === 'visibilityChanged') {
+                    const isVisible = event.data.isVisible;
+                    const iframeId = event.data.iframeId;
+                    
+                    if (isVisible) {
+                        // iframe变为可见，恢复全景图
+                        console.log(`iframe ${iframeId} 变为可见，恢复全景图`);
+                        resumePanoramas();
+                    } else {
+                        // iframe变为不可见，暂停全景图
+                        console.log(`iframe ${iframeId} 变为不可见，暂停全景图`);
+                        pausePanoramas();
+                    }
+                }
                 
+                // 处理准备卸载命令
+                if (event.data.command === 'prepareUnload') {
+                    const iframeId = event.data.iframeId;
+                    console.log(`iframe ${iframeId} 准备卸载，释放资源`);
+                    
+                    // 释放全景图资源
+                    releaseResources();
+                    
+                    // 通知父窗口资源已释放
+                    window.parent.postMessage({
+                        type: 'resourcesReleased',
+                        iframeId: iframeId
+                    }, '*');
+                }
                 // 可以实现各种父窗口交互功能
                 if (event.data.command === 'scrollEnabled') {
                     // 处理滚动启用指令
@@ -1823,6 +1914,157 @@
                 }
             }
         });
+        // 暂停全景图
+        function pausePanoramas() {
+            // 停止自动旋转和其他动画
+            if (rotationInterval) {
+                clearInterval(rotationInterval);
+                rotationInterval = null;
+            }
+            
+            // 停止自动播放
+            if (autoPlayInterval) {
+                clearInterval(autoPlayInterval);
+                autoPlayInterval = null;
+            }
+            
+            // 暂停所有全景图渲染
+            panoramaViewers.forEach((viewer, index) => {
+                if (viewer) {
+                    try {
+                        // 如果有暂停方法就调用
+                        if (typeof viewer.pause === 'function') {
+                            viewer.pause();
+                        }
+                        
+                        // 隐藏全景图容器以减少GPU使用
+                        const container = document.getElementById(panoramaImages[index].id);
+                        if (container) {
+                            const pnlmContainer = container.querySelector('.pnlm-container');
+                            if (pnlmContainer) {
+                                pnlmContainer.style.visibility = 'hidden';
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('暂停全景图失败:', e);
+                    }
+                }
+            });
+        }
+        
+        // 恢复全景图
+        function resumePanoramas() {
+            // 恢复所有全景图渲染
+            panoramaViewers.forEach((viewer, index) => {
+                if (viewer) {
+                    try {
+                        // 如果有恢复方法就调用
+                        if (typeof viewer.resume === 'function') {
+                            viewer.resume();
+                        }
+                        
+                        // 显示全景图容器
+                        const container = document.getElementById(panoramaImages[index].id);
+                        if (container) {
+                            const pnlmContainer = container.querySelector('.pnlm-container');
+                            if (pnlmContainer) {
+                                pnlmContainer.style.visibility = 'visible';
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('恢复全景图失败:', e);
+                    }
+                }
+            });
+            
+            // 如果当前没有用户交互，恢复自动播放和旋转
+            if (!isUserInteracting) {
+                startAutoPlay();
+                checkAndStartRotation();
+            }
+        }
+        // 释放资源
+        function releaseResources() {
+            // 停止所有定时器
+            if (rotationInterval) {
+                clearInterval(rotationInterval);
+                rotationInterval = null;
+            }
+            
+            if (autoPlayInterval) {
+                clearInterval(autoPlayInterval);
+                autoPlayInterval = null;
+            }
+            
+            if (hoverCheckInterval) {
+                clearInterval(hoverCheckInterval);
+                hoverCheckInterval = null;
+            }
+            
+            if (autoPlayTimeoutId) {
+                clearTimeout(autoPlayTimeoutId);
+                autoPlayTimeoutId = null;
+            }
+            
+            // 销毁所有全景图实例
+            panoramaViewers.forEach((viewer, index) => {
+                if (viewer) {
+                    try {
+                        // 尝试调用destroy方法
+                        if (typeof viewer.destroy === 'function') {
+                            viewer.destroy();
+                        }
+                        
+                        // 移除DOM元素
+                        const container = document.getElementById(panoramaImages[index].id);
+                        if (container) {
+                            while (container.firstChild) {
+                                container.removeChild(container.firstChild);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('销毁全景图失败:', e);
+                    }
+                }
+            });
+            
+            // 清空全景图数组
+            panoramaViewers = [];
+            
+            // 移除所有事件监听器
+            const carouselItems = document.querySelectorAll('.carousel-item');
+            carouselItems.forEach(item => {
+                item.removeEventListener('mouseenter', null);
+                item.removeEventListener('mouseleave', null);
+                item.removeEventListener('mousedown', null);
+            });
+            
+            // 移除滚轮事件处理器
+            wheelEventHandlers.forEach((handler, elementId) => {
+                const element = document.getElementById(elementId);
+                if (element) {
+                    element.removeEventListener('wheel', handler, { passive: false });
+                }
+            });
+            wheelEventHandlers.clear();
+            
+            // 强制垃圾回收（虽然不能直接调用，但可以帮助提示浏览器）
+            panoramaImages.forEach(image => {
+                image.loaded = false;
+            });
+            
+            // 清空其他可能的引用
+            hoverItem = null;
+            lastHoverItemId = null;
+            isAnimating = false;
+            isUserInteracting = false;
+            isCenterHovered = false;
+            
+            // 通知浏览器这是一个好时机进行垃圾回收
+            setTimeout(() => {
+                // 空函数，给垃圾回收一个机会
+            }, 0);
+        }
     </script>
 </body>
 </html>
